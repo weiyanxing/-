@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>君正股份 2026 半年报</title>
+<style>
+  html, body { margin: 0; background: #050C1C; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// ===== 君正股份（300223.SZ / 03223.HK）2026 年半年报 · 仪表盘动画 =====
+// 每一帧都由 renderFrame(t) 确定性地画出，t 为秒（0–30）。
+const W = 1920, H = 1080, DURATION = 30;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+const C = {
+  bg0: '#0B1B36', bg1: '#050C1C',
+  gold: '#F5B342', goldHi: '#FFD27A', goldDim: 'rgba(245,179,66,0.18)',
+  teal: '#2DD4BF', tealDim: 'rgba(45,212,191,0.22)',
+  text: '#E8EEF8', sub: '#8FA3C4', faint: 'rgba(143,163,196,0.35)',
+  track: 'rgba(120,150,200,0.14)',
+};
+const ZH = '"WenQuanYi Zen Hei", sans-serif';
+const NUM = '"Liberation Sans", "DejaVu Sans", sans-serif';
+
+// 核心数据（来源：君正股份 2026 年半年度报告及公开报道）
+const D = {
+  revenue: 39.57, revenueYoY: 75.9,
+  netProfit: 11.98, netProfitYoY: 489.6,
+  netProfitDeduct: 11.68, purity: 97.4,
+  grossMargin: 51.8, grossMarginLast: 35.5,
+  eps: 2.48,
+  ocf: 9.59, ocfYoY: 121.7,
+  storage: 26.31, storageShare: 26.31 / 39.57 * 100, storageYoY: 90.1,
+  computeYoY: 72.7, analogYoY: 10.6,
+};
+
+// ---------- 工具 ----------
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const prog = (t, s, d) => clamp((t - s) / d);
+const easeOut = x => 1 - Math.pow(1 - x, 3);
+const easeInOut = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const easeBack = x => { const c1 = 1.4, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const lerp = (a, b, k) => a + (b - a) * k;
+function rand(i) { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+
+// 场景透明度：淡入 / 淡出
+function sceneAlpha(t, s, e, fi = .45, fo = .45) {
+  if (t < s || t > e) return 0;
+  return Math.min(clamp((t - s) / fi), clamp((e - t) / fo));
+}
+
+function text(str, x, y, { size = 32, color = C.text, font = ZH, weight = '', align = 'left', base = 'alphabetic', glow = 0, glowColor = null, alpha = 1, spacing = 0 } = {}) {
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.font = `${weight} ${size}px ${font}`;
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.textBaseline = base;
+  if (spacing) ctx.letterSpacing = spacing + 'px';
+  if (glow) { ctx.shadowColor = glowColor || color; ctx.shadowBlur = glow; }
+  ctx.fillText(str, x, y);
+  ctx.restore();
+}
+
+function measure(str, size, font = ZH, weight = '') {
+  ctx.save(); ctx.font = `${weight} ${size}px ${font}`; const w = ctx.measureText(str).width; ctx.restore(); return w;
+}
+
+// 数字 + 单位，整体对齐
+function numberWithUnit(num, unit, x, y, { size = 120, unitSize = 40, color = C.goldHi, unitColor = C.sub, align = 'center', glow = 30, alpha = 1 } = {}) {
+  ctx.save(); ctx.globalAlpha *= alpha;
+  const nw = measure(num, size, NUM, 'bold');
+  const uw = unit ? measure(unit, unitSize, ZH) + 12 : 0;
+  const total = nw + uw;
+  let x0 = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
+  text(num, x0, y, { size, font: NUM, weight: 'bold', color, glow, glowColor: 'rgba(245,179,66,0.55)' });
+  if (unit) text(unit, x0 + nw + 12, y, { size: unitSize, color: unitColor });
+  ctx.restore();
+}
+
+// ---------- 背景 & HUD ----------
+function background(t) {
+  const g = ctx.createRadialGradient(W / 2, H * .45, 80, W / 2, H / 2, W * .75);
+  g.addColorStop(0, C.bg0); g.addColorStop(1, C.bg1);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // 网格
+  ctx.save();
+  ctx.strokeStyle = 'rgba(90,140,210,0.06)'; ctx.lineWidth = 1;
+  const off = (t * 12) % 60;
+  for (let x = -60 + off; x < W; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 60) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.restore();
+
+  // 漂浮光点
+  ctx.save();
+  for (let i = 0; i < 70; i++) {
+    const px = (rand(i) * W + t * (8 + rand(i + 9) * 18)) % W;
+    const py = (rand(i + 3) * H - t * (6 + rand(i + 5) * 14) + H * 10) % H;
+    const tw = .25 + .75 * (.5 + .5 * Math.sin(t * 2 + i));
+    ctx.fillStyle = i % 5 === 0 ? `rgba(45,212,191,${.35 * tw})` : `rgba(245,179,66,${.28 * tw})`;
+    ctx.beginPath(); ctx.arc(px, py, 1 + rand(i + 7) * 1.8, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+
+  // 扫描线
+  const sy = ((t * 260) % (H + 400)) - 200;
+  const sg = ctx.createLinearGradient(0, sy - 120, 0, sy);
+  sg.addColorStop(0, 'rgba(45,212,191,0)'); sg.addColorStop(1, 'rgba(45,212,191,0.05)');
+  ctx.fillStyle = sg; ctx.fillRect(0, sy - 120, W, 120);
+}
+
+const CHAPTERS = [
+  { s: 0, e: 3.6, name: '开篇' },
+  { s: 3.6, e: 9.6, name: '营业收入' },
+  { s: 9.6, e: 15.6, name: '归母净利润' },
+  { s: 15.6, e: 20.6, name: '毛利率' },
+  { s: 20.6, e: 25.6, name: '业务结构' },
+  { s: 25.6, e: 30, name: '总览' },
+];
+
+function hud(t) {
+  const a = easeOut(prog(t, .1, .8));
+  ctx.save(); ctx.globalAlpha = a;
+
+  // 四角括号
+  ctx.strokeStyle = C.gold; ctx.lineWidth = 3;
+  const m = 36, L = 54 * a;
+  [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]].forEach(([x, y, sx, sy]) => {
+    ctx.beginPath(); ctx.moveTo(x, y + sy * L); ctx.lineTo(x, y); ctx.lineTo(x + sx * L, y); ctx.stroke();
+  });
+
+  // 顶栏
+  text('君正股份', 84, 92, { size: 30, color: C.gold, weight: 'bold' });
+  text('300223.SZ  ·  03223.HK', 222, 92, { size: 22, color: C.sub, font: NUM });
+  text('2026 H1  半年度报告', W - 84, 92, { size: 26, color: C.text, align: 'right' });
+  ctx.fillStyle = C.teal;
+  const blink = .5 + .5 * Math.sin(t * 6);
+  ctx.globalAlpha = a * (.4 + .6 * blink);
+  ctx.beginPath(); ctx.arc(W - 360, 83, 6, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = a;
+  const lg = ctx.createLinearGradient(84, 0, W - 84, 0);
+  lg.addColorStop(0, 'rgba(245,179,66,0.8)'); lg.addColorStop(.5, 'rgba(245,179,66,0.15)'); lg.addColorStop(1, 'rgba(45,212,191,0.6)');
+  ctx.fillStyle = lg; ctx.fillRect(84, 112, (W - 168) * a, 1.5);
+
+  // 底部章节进度
+  const by = H - 70, bx0 = 84, bx1 = W - 84, bw = bx1 - bx0;
+  ctx.fillStyle = C.track; ctx.fillRect(bx0, by, bw, 3);
+  const pg = ctx.createLinearGradient(bx0, 0, bx1, 0);
+  pg.addColorStop(0, C.gold); pg.addColorStop(1, C.goldHi);
+  ctx.fillStyle = pg; ctx.fillRect(bx0, by, bw * clamp(t / DURATION), 3);
+  CHAPTERS.forEach((c, i) => {
+    const x = bx0 + bw * (c.s / DURATION);
+    const active = t >= c.s && t < c.e;
+    ctx.fillStyle = t >= c.s ? C.gold : C.faint;
+    ctx.fillRect(x - 1, by - 8, 2, 19);
+    text(c.name, x + 10, by + 30, { size: 18, color: active ? C.goldHi : C.sub, alpha: active ? 1 : .7 });
+  });
+  ctx.restore();
+}
+
+// ---------- 仪表盘组件 ----------
+// 270° 仪表：起点 135°，终点 405°
+const G0 = Math.PI * .75, GS = Math.PI * 1.5;
+
+function gauge(cx, cy, r, { k = 0, max = 100, majors = 5, minors = 4, label = v => v, redFrom = null, ghost = null, appear = 1, thick = 18, needle = true, color = C.gold, tickLabels = true } = {}) {
+  ctx.save();
+  ctx.globalAlpha *= appear;
+  const sweep = GS * easeOut(appear);
+
+  // 外圈装饰
+  ctx.strokeStyle = 'rgba(245,179,66,0.12)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, cy, r + 34, G0, G0 + sweep); ctx.stroke();
+  ctx.setLineDash([2, 10]); ctx.strokeStyle = 'rgba(45,212,191,0.25)';
+  ctx.beginPath(); ctx.arc(cx, cy, r + 48, G0, G0 + sweep); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 轨道
+  ctx.lineCap = 'butt';
+  ctx.strokeStyle = C.track; ctx.lineWidth = thick;
+  ctx.beginPath(); ctx.arc(cx, cy, r, G0, G0 + sweep); ctx.stroke();
+
+  // 红区
+  if (redFrom !== null) {
+    const a0 = G0 + GS * (redFrom / max);
+    ctx.strokeStyle = 'rgba(255,120,70,0.35)'; ctx.lineWidth = thick;
+    ctx.beginPath(); ctx.arc(cx, cy, r, a0, Math.min(G0 + GS, G0 + sweep)); ctx.stroke();
+  }
+
+  // 刻度
+  const n = majors * minors;
+  for (let i = 0; i <= n; i++) {
+    const f = i / n; if (f * GS > sweep + 1e-6) break;
+    const ang = G0 + GS * f, major = i % minors === 0;
+    const r1 = r - thick / 2 - 10, r2 = r1 - (major ? 26 : 12);
+    ctx.strokeStyle = major ? 'rgba(232,238,248,0.75)' : 'rgba(143,163,196,0.4)';
+    ctx.lineWidth = major ? 3 : 1.5;
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(ang) * r1, cy + Math.sin(ang) * r1);
+    ctx.lineTo(cx + Math.cos(ang) * r2, cy + Math.sin(ang) * r2); ctx.stroke();
+    if (major && tickLabels && i > 0 && i < n) {
+      const rl = r2 - 30;
+      text(String(label(max * f)), cx + Math.cos(ang) * rl, cy + Math.sin(ang) * rl, { size: Math.max(16, r * .07), color: C.sub, font: NUM, align: 'center', base: 'middle' });
+    }
+  }
+
+  // 上期幽灵刻度
+  if (ghost !== null) {
+    const ga = G0 + GS * (ghost.v / max);
+    ctx.strokeStyle = C.teal; ctx.lineWidth = 5; ctx.shadowColor = C.teal; ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(ga) * (r - thick), cy + Math.sin(ga) * (r - thick));
+    ctx.lineTo(cx + Math.cos(ga) * (r + thick + 6), cy + Math.sin(ga) * (r + thick + 6)); ctx.stroke();
+    ctx.shadowBlur = 0;
+    if (ghost.label) {
+      const lr = r + thick + 30;
+      text(ghost.label, cx + Math.cos(ga) * lr, cy + Math.sin(ga) * lr, { size: 20, color: C.teal, align: 'center', base: 'middle' });
+    }
+  }
+
+  // 数值弧（带光晕）
+  if (k > 0) {
+    const ae = G0 + GS * clamp(k, 0, 1.03);
+    const grad = ctx.createLinearGradient(cx - r, cy, cx + r, cy);
+    grad.addColorStop(0, 'rgba(245,179,66,0.55)'); grad.addColorStop(1, color === C.teal ? C.teal : C.goldHi);
+    ctx.strokeStyle = grad; ctx.lineWidth = thick;
+    ctx.shadowColor = color; ctx.shadowBlur = 28;
+    ctx.beginPath(); ctx.arc(cx, cy, r, G0, ae); ctx.stroke();
+    ctx.shadowBlur = 0;
+    // 弧端亮点
+    ctx.fillStyle = '#FFF4D6'; ctx.shadowColor = C.goldHi; ctx.shadowBlur = 24;
+    ctx.beginPath(); ctx.arc(cx + Math.cos(ae) * r, cy + Math.sin(ae) * r, thick * .42, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // 指针
+  if (needle) {
+    const na = G0 + GS * clamp(k, -0.02, 1.03);
+    const nl = r - thick - 22;
+    ctx.save();
+    ctx.translate(cx, cy); ctx.rotate(na);
+    ctx.shadowColor = C.goldHi; ctx.shadowBlur = 20;
+    const ng = ctx.createLinearGradient(0, 0, nl, 0);
+    ng.addColorStop(0, 'rgba(245,179,66,0.2)'); ng.addColorStop(1, C.goldHi);
+    ctx.fillStyle = ng;
+    ctx.beginPath(); ctx.moveTo(-r * .12, 0); ctx.lineTo(0, -7); ctx.lineTo(nl, -1.5); ctx.lineTo(nl, 1.5); ctx.lineTo(0, 7); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // 轴心
+    ctx.fillStyle = '#0B1B36'; ctx.strokeStyle = C.gold; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, 16, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = C.teal; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 读数底板：盖住指针，保证大数字清晰
+function plate(cx, y, w, h, alpha = 1) {
+  ctx.save(); ctx.globalAlpha *= alpha;
+  const g = ctx.createLinearGradient(cx - w / 2, 0, cx + w / 2, 0);
+  g.addColorStop(0, 'rgba(8,20,42,0)'); g.addColorStop(.18, 'rgba(8,20,42,0.92)');
+  g.addColorStop(.82, 'rgba(8,20,42,0.92)'); g.addColorStop(1, 'rgba(8,20,42,0)');
+  ctx.fillStyle = g; ctx.fillRect(cx - w / 2, y, w, h);
+  ctx.fillStyle = 'rgba(245,179,66,0.35)'; ctx.fillRect(cx - w * .32, y, w * .64, 1.5); ctx.fillRect(cx - w * .32, y + h - 1.5, w * .64, 1.5);
+  ctx.restore();
+}
+
+function panel(x, y, w, h, alpha = 1) {
+  ctx.save(); ctx.globalAlpha *= alpha;
+  ctx.fillStyle = 'rgba(14,32,62,0.55)';
+  ctx.strokeStyle = 'rgba(245,179,66,0.22)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 14); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.gold; ctx.fillRect(x, y + 18, 4, 30);
+  ctx.restore();
+}
+
+function badge(str, x, y, { color = C.teal, size = 34, alpha = 1 } = {}) {
+  const w = measure(str, size, NUM, 'bold') + size * 1.6 + 20;
+  const h = size * 1.55;
+  ctx.save(); ctx.globalAlpha *= alpha;
+  ctx.fillStyle = color === C.teal ? 'rgba(45,212,191,0.14)' : 'rgba(245,179,66,0.14)';
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(x, y - h / 2, w, h, h / 2); ctx.fill(); ctx.stroke();
+  // 上箭头
+  const ax = x + size * .85, ay = y;
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.moveTo(ax, ay - size * .38); ctx.lineTo(ax + size * .32, ay + size * .05); ctx.lineTo(ax - size * .32, ay + size * .05); ctx.closePath(); ctx.fill();
+  ctx.fillRect(ax - size * .1, ay, size * .2, size * .34);
+  ctx.restore();
+  text(str, x + size * 1.5, y, { size, font: NUM, weight: 'bold', color, base: 'middle', alpha, glow: 16 });
+  return w;
+}
+
+function hbar(x, y, w, h, k, { color = C.gold, label = '', value = '', alpha = 1 } = {}) {
+  ctx.save(); ctx.globalAlpha *= alpha;
+  ctx.fillStyle = C.track; ctx.fillRect(x, y, w, h);
+  const g = ctx.createLinearGradient(x, 0, x + w, 0);
+  if (color === C.teal) { g.addColorStop(0, 'rgba(45,212,191,0.35)'); g.addColorStop(1, C.teal); }
+  else { g.addColorStop(0, 'rgba(245,179,66,0.4)'); g.addColorStop(1, C.goldHi); }
+  ctx.fillStyle = g; ctx.shadowColor = color; ctx.shadowBlur = 18;
+  ctx.fillRect(x, y, w * k, h);
+  ctx.restore();
+  if (label) text(label, x, y - 16, { size: 24, color: C.sub, alpha });
+  if (value) text(value, x + w, y - 14, { size: 28, color: color === C.teal ? C.teal : C.goldHi, font: NUM, weight: 'bold', align: 'right', alpha });
+}
+
+// LED 分段条
+function ledBar(x, y, w, h, k, { segs = 40, color = C.gold, alpha = 1 } = {}) {
+  ctx.save(); ctx.globalAlpha *= alpha;
+  const gap = 4, sw = (w - gap * (segs - 1)) / segs;
+  const lit = k * segs;
+  for (let i = 0; i < segs; i++) {
+    const on = clamp(lit - i);
+    ctx.fillStyle = C.track; ctx.fillRect(x + i * (sw + gap), y, sw, h);
+    if (on > 0) {
+      ctx.globalAlpha = alpha * on;
+      ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 12;
+      ctx.fillRect(x + i * (sw + gap), y, sw, h);
+      ctx.shadowBlur = 0; ctx.globalAlpha = alpha;
+    }
+  }
+  ctx.restore();
+}
+
+const fmt = (v, d = 2) => v.toFixed(d);
+
+// ---------- 场景 ----------
+function scene1(t) { // 0 – 3.6 开篇
+  const a = sceneAlpha(t, 0, 3.6, .3, .5); if (!a) return;
+  ctx.save(); ctx.globalAlpha = a;
+  const cx = W / 2, cy = 500;
+  // 旋转分段环
+  for (let ring = 0; ring < 3; ring++) {
+    const r = 260 + ring * 46, segs = 24 + ring * 12;
+    const rot = t * (ring % 2 ? -.35 : .5) + ring;
+    const grow = easeOut(prog(t, ring * .15, 1.2));
+    ctx.strokeStyle = ring === 1 ? 'rgba(45,212,191,0.45)' : 'rgba(245,179,66,0.5)';
+    ctx.lineWidth = ring === 0 ? 6 : 2;
+    for (let i = 0; i < segs * grow; i++) {
+      if (rand(i + ring * 50) < .25) continue;
+      const a0 = rot + i / segs * Math.PI * 2;
+      ctx.beginPath(); ctx.arc(cx, cy, r, a0, a0 + Math.PI * 2 / segs * .62); ctx.stroke();
+    }
+  }
+  // 标题擦除揭示
+  const rv = easeInOut(prog(t, .5, 1));
+  ctx.save();
+  ctx.beginPath(); ctx.rect(cx - 600, 300, 1200 * rv, 400); ctx.clip();
+  text('君正股份', cx, 500, { size: 150, color: C.goldHi, weight: 'bold', align: 'center', glow: 40, glowColor: 'rgba(245,179,66,0.6)', spacing: 12 });
+  ctx.restore();
+  const s2 = easeOut(prog(t, 1.2, .8));
+  text('2026 年半年度报告 · 核心数据', cx, 600 + (1 - s2) * 30, { size: 46, color: C.text, align: 'center', alpha: s2, spacing: 6 });
+  const s3 = easeOut(prog(t, 1.8, .8));
+  ctx.fillStyle = C.teal; ctx.globalAlpha = a * s3;
+  ctx.fillRect(cx - 220 * s3, 650, 440 * s3, 2);
+  ctx.globalAlpha = a;
+  text('存储大周期  ·  量利齐升', cx, 712, { size: 34, color: C.teal, align: 'center', alpha: s3, spacing: 8 });
+  ctx.restore();
+}
+
+function scene2(t) { // 3.6 – 9.6 营业收入
+  const S = 3.6, a = sceneAlpha(t, S, 9.6); if (!a) return;
+  const lt = t - S;
+  ctx.save(); ctx.globalAlpha = a;
+  const cx = 700, cy = 590, r = 330;
+  const appear = easeOut(prog(lt, 0, .9));
+  const kk = easeBack(prog(lt, .7, 2.2));
+  const val = D.revenue * kk;
+  gauge(cx, cy, r, { k: val / 50, max: 50, majors: 5, minors: 5, appear, label: v => v.toFixed(0) });
+  plate(cx, cy + 62, 620, 168, appear);
+  text('营业收入', cx, cy + 106, { size: 34, color: C.sub, align: 'center', alpha: appear });
+  numberWithUnit(fmt(Math.min(val, D.revenue)), '亿元', cx, cy + 205, { size: 104, unitSize: 40, alpha: appear });
+  text('单位：亿元', cx, cy + r + 30, { size: 20, color: C.faint, align: 'center', alpha: appear });
+
+  // 右侧信息板
+  const pa = easeOut(prog(lt, 1.2, .8)), px = 1150 + (1 - pa) * 60;
+  panel(px, 250, 650, 560, pa);
+  text('REVENUE', px + 40, 310, { size: 22, color: C.gold, font: NUM, spacing: 6, alpha: pa });
+  text('营业收入同比增长', px + 40, 370, { size: 36, color: C.text, alpha: pa });
+  const yoy = D.revenueYoY * easeOut(prog(lt, 1.6, 1.6));
+  badge('+' + yoy.toFixed(1) + '%', px + 40, 450, { size: 52, alpha: pa });
+
+  const ba = easeOut(prog(lt, 2.4, 1.6));
+  const last = D.revenue / (1 + D.revenueYoY / 100);
+  hbar(px + 40, 580, 570, 22, ba * last / 42, { color: C.teal, label: '2025 H1', value: fmt(last * ba) + ' 亿', alpha: pa });
+  hbar(px + 40, 690, 570, 22, ba * D.revenue / 42, { label: '2026 H1', value: fmt(D.revenue * ba) + ' 亿', alpha: pa });
+  text('存储芯片量价齐升，驱动营收高增长', px + 40, 770, { size: 22, color: C.sub, alpha: easeOut(prog(lt, 3.4, .8)) * pa });
+  ctx.restore();
+}
+
+function scene3(t) { // 9.6 – 15.6 归母净利润
+  const S = 9.6, a = sceneAlpha(t, S, 15.6); if (!a) return;
+  const lt = t - S;
+  ctx.save(); ctx.globalAlpha = a;
+  const cx = 1220, cy = 590, r = 330;
+  const appear = easeOut(prog(lt, 0, .9));
+  const kk = easeBack(prog(lt, .7, 2.4));
+  // 冲入红区后的轻微抖动
+  const shake = lt > 2.2 ? Math.sin(lt * 38) * .004 * Math.exp(-(lt - 2.2) * 1.5) : 0;
+  const yoy = D.netProfitYoY * kk;
+  gauge(cx, cy, r, { k: yoy / 500 + shake, max: 500, majors: 5, minors: 5, appear, redFrom: 400, label: v => v.toFixed(0) + '%' });
+  plate(cx, cy + 62, 620, 168, appear);
+  text('归母净利润同比', cx, cy + 106, { size: 34, color: C.sub, align: 'center', alpha: appear });
+  numberWithUnit('+' + Math.min(yoy, D.netProfitYoY).toFixed(1), '%', cx, cy + 205, { size: 104, unitSize: 56, unitColor: C.goldHi, alpha: appear });
+
+  // 左侧信息板
+  const pa = easeOut(prog(lt, 1.0, .8)), px = 120 - (1 - pa) * 60;
+  panel(px, 250, 640, 560, pa);
+  text('NET PROFIT', px + 40, 310, { size: 22, color: C.gold, font: NUM, spacing: 6, alpha: pa });
+  text('归属于上市公司股东的净利润', px + 40, 368, { size: 30, color: C.text, alpha: pa });
+  const np = D.netProfit * easeOut(prog(lt, 1.3, 1.8));
+  ctx.save(); ctx.globalAlpha *= pa;
+  numberWithUnit(fmt(np), '亿元', px + 40, 488, { size: 104, unitSize: 38, align: 'left' });
+  ctx.restore();
+
+  const sa = easeOut(prog(lt, 2.4, .8));
+  ctx.fillStyle = 'rgba(245,179,66,0.18)'; ctx.globalAlpha = a * sa; ctx.fillRect(px + 40, 530, 560, 1.5); ctx.globalAlpha = a;
+  text('扣非归母净利润', px + 40, 590, { size: 26, color: C.sub, alpha: sa });
+  text(fmt(D.netProfitDeduct * easeOut(prog(lt, 2.4, 1.4))) + ' 亿元', px + 600, 590, { size: 34, color: C.goldHi, font: NUM, weight: 'bold', align: 'right', alpha: sa });
+  text('利润纯度（扣非 / 归母）', px + 40, 668, { size: 26, color: C.sub, alpha: sa });
+  const pk = easeOut(prog(lt, 2.8, 1.4));
+  text((D.purity * pk).toFixed(1) + '%', px + 600, 668, { size: 34, color: C.teal, font: NUM, weight: 'bold', align: 'right', alpha: sa });
+  ledBar(px + 40, 700, 560, 18, pk * D.purity / 100, { segs: 32, color: C.teal, alpha: sa });
+  text('盈利几乎全部来自主营业务', px + 40, 770, { size: 22, color: C.sub, alpha: easeOut(prog(lt, 3.6, .8)) * pa });
+  ctx.restore();
+}
+
+function scene4(t) { // 15.6 – 20.6 毛利率
+  const S = 15.6, a = sceneAlpha(t, S, 20.6); if (!a) return;
+  const lt = t - S;
+  ctx.save(); ctx.globalAlpha = a;
+  const cx = 700, cy = 590, r = 330;
+  const appear = easeOut(prog(lt, 0, .8));
+  // 指针先到上年同期，停顿后升到本期
+  const k1 = easeOut(prog(lt, .6, 1.0)) * D.grossMarginLast;
+  const k2 = easeBack(prog(lt, 1.9, 1.4)) * (D.grossMargin - D.grossMarginLast);
+  const gm = k1 + k2;
+  gauge(cx, cy, r, { k: gm / 100, max: 100, majors: 10, minors: 2, appear, label: v => v.toFixed(0),
+    ghost: lt > 1.6 ? { v: D.grossMarginLast, label: '上年同期' } : null });
+  plate(cx, cy + 62, 620, 168, appear);
+  text('综合毛利率', cx, cy + 106, { size: 34, color: C.sub, align: 'center', alpha: appear });
+  numberWithUnit(Math.min(gm, D.grossMargin).toFixed(1), '%', cx, cy + 205, { size: 104, unitSize: 56, unitColor: C.goldHi, alpha: appear });
+
+  const pa = easeOut(prog(lt, 1.0, .8)), px = 1150 + (1 - pa) * 60;
+  panel(px, 250, 650, 560, pa);
+  text('GROSS MARGIN', px + 40, 310, { size: 22, color: C.gold, font: NUM, spacing: 6, alpha: pa });
+  text('毛利率同比提升', px + 40, 370, { size: 36, color: C.text, alpha: pa });
+  const da = easeOut(prog(lt, 2.2, 1.2));
+  badge('+' + (16.3 * da).toFixed(1) + ' pct', px + 40, 450, { size: 52, alpha: pa });
+  text('35.5%', px + 40, 580, { size: 44, color: C.teal, font: NUM, weight: 'bold', alpha: pa });
+  text('2025 H1', px + 40, 620, { size: 20, color: C.sub, alpha: pa });
+  // 箭头
+  const aa = easeOut(prog(lt, 2.0, .8));
+  ctx.strokeStyle = C.gold; ctx.lineWidth = 3; ctx.globalAlpha = a * aa;
+  ctx.beginPath(); ctx.moveTo(px + 230, 565); ctx.lineTo(px + 230 + 120 * aa, 565); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(px + 230 + 120 * aa, 565); ctx.lineTo(px + 218 + 120 * aa, 555); ctx.moveTo(px + 230 + 120 * aa, 565); ctx.lineTo(px + 218 + 120 * aa, 575); ctx.stroke();
+  ctx.globalAlpha = a;
+  text('51.8%', px + 390, 580, { size: 44, color: C.goldHi, font: NUM, weight: 'bold', alpha: aa * pa, glow: 18 });
+  text('2026 H1', px + 390, 620, { size: 20, color: C.sub, alpha: aa * pa });
+  const ea = easeOut(prog(lt, 2.8, .8));
+  ctx.fillStyle = 'rgba(245,179,66,0.18)'; ctx.globalAlpha = a * ea; ctx.fillRect(px + 40, 665, 570, 1.5); ctx.globalAlpha = a;
+  text('每股收益', px + 40, 735, { size: 28, color: C.sub, alpha: ea });
+  text((D.eps * easeOut(prog(lt, 2.8, 1.2))).toFixed(2) + ' 元', px + 610, 738, { size: 48, color: C.goldHi, font: NUM, weight: 'bold', align: 'right', alpha: ea, glow: 18 });
+  ctx.restore();
+}
+
+function scene5(t) { // 20.6 – 25.6 业务结构
+  const S = 20.6, a = sceneAlpha(t, S, 25.6); if (!a) return;
+  const lt = t - S;
+  ctx.save(); ctx.globalAlpha = a;
+  const cx = 600, cy = 580, r = 270;
+  const appear = easeOut(prog(lt, 0, .8));
+  const dk = easeInOut(prog(lt, .4, 1.6));
+  // 背景环
+  ctx.lineWidth = 56; ctx.strokeStyle = C.track;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2 * appear); ctx.stroke();
+  const st = -Math.PI / 2, share = D.storageShare / 100;
+  // 存储芯片
+  ctx.strokeStyle = C.gold; ctx.shadowColor = C.gold; ctx.shadowBlur = 26;
+  ctx.beginPath(); ctx.arc(cx, cy, r, st, st + Math.PI * 2 * share * dk); ctx.stroke();
+  // 其他
+  ctx.strokeStyle = C.teal; ctx.shadowColor = C.teal; ctx.shadowBlur = 14; ctx.globalAlpha = a * .75;
+  const o0 = st + Math.PI * 2 * share + .03;
+  ctx.beginPath(); ctx.arc(cx, cy, r, o0, o0 + (Math.PI * 2 * (1 - share) - .06) * dk); ctx.stroke();
+  ctx.shadowBlur = 0; ctx.globalAlpha = a;
+  // 外圈刻度
+  for (let i = 0; i < 100; i++) {
+    const an = st + i / 100 * Math.PI * 2, big = i % 10 === 0;
+    if (i / 100 > appear) break;
+    ctx.strokeStyle = big ? 'rgba(232,238,248,0.6)' : 'rgba(143,163,196,0.3)'; ctx.lineWidth = big ? 2.5 : 1;
+    const r1 = r + 46, r2 = r1 + (big ? 16 : 8);
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(an) * r1, cy + Math.sin(an) * r1); ctx.lineTo(cx + Math.cos(an) * r2, cy + Math.sin(an) * r2); ctx.stroke();
+  }
+  text('存储芯片营收', cx, cy - 70, { size: 30, color: C.sub, align: 'center', alpha: appear });
+  numberWithUnit(fmt(D.storage * dk), '亿元', cx, cy + 30, { size: 100, unitSize: 36, alpha: appear });
+  text('营收占比 ' + (D.storageShare * dk).toFixed(0) + '%', cx, cy + 90, { size: 32, color: C.gold, align: 'center', alpha: appear });
+  // 图例
+  const la = easeOut(prog(lt, 1.8, .6));
+  ctx.globalAlpha = a * la;
+  ctx.fillStyle = C.gold; ctx.fillRect(cx - 200, cy + r + 90, 18, 18);
+  ctx.fillStyle = C.teal; ctx.fillRect(cx + 40, cy + r + 90, 18, 18);
+  ctx.globalAlpha = a;
+  text('存储芯片', cx - 170, cy + r + 106, { size: 22, color: C.text, alpha: la });
+  text('计算 / 模拟与互联', cx + 70, cy + r + 106, { size: 22, color: C.text, alpha: la });
+
+  // 右侧：三大产品线增速
+  const pa = easeOut(prog(lt, .8, .8)), px = 1060 + (1 - pa) * 60;
+  panel(px, 250, 740, 560, pa);
+  text('SEGMENT GROWTH', px + 40, 310, { size: 22, color: C.gold, font: NUM, spacing: 6, alpha: pa });
+  text('三大产品线营收同比', px + 40, 368, { size: 34, color: C.text, alpha: pa });
+  const rows = [
+    ['存储芯片', D.storageYoY, C.gold],
+    ['计算芯片', D.computeYoY, C.gold],
+    ['模拟与互联芯片', D.analogYoY, C.teal],
+  ];
+  rows.forEach(([name, v, col], i) => {
+    const rk = easeOut(prog(lt, 1.4 + i * .45, 1.4));
+    const y = 470 + i * 112;
+    text(name, px + 40, y, { size: 28, color: C.text, alpha: pa });
+    text('+' + (v * rk).toFixed(1) + '%', px + 700, y, { size: 36, color: col === C.teal ? C.teal : C.goldHi, font: NUM, weight: 'bold', align: 'right', alpha: pa, glow: 12 });
+    ledBar(px + 40, y + 22, 660, 22, rk * v / 100, { segs: 44, color: col, alpha: pa });
+  });
+  text('标尺：0 – 100%', px + 40, 790, { size: 18, color: C.faint, alpha: pa });
+  ctx.restore();
+}
+
+function scene6(t) { // 25.6 – 30 总览
+  const S = 25.6, a = sceneAlpha(t, S, 30.5, .45, .6); if (!a) return;
+  const lt = t - S;
+  ctx.save(); ctx.globalAlpha = a;
+  const fade = 1 - easeInOut(prog(t, 29.2, .8));
+  ctx.globalAlpha = a * fade;
+  text('2026 H1 核心数据总览', W / 2, 200, { size: 44, color: C.text, align: 'center', alpha: easeOut(prog(lt, 0, .6)), spacing: 6 });
+  const items = [
+    { name: '营业收入', v: D.revenue, max: 50, num: v => fmt(v), unit: '亿元', yoy: '+75.9%' },
+    { name: '归母净利润', v: D.netProfit, max: 15, num: v => fmt(v), unit: '亿元', yoy: '+489.6%' },
+    { name: '综合毛利率', v: D.grossMargin, max: 100, num: v => v.toFixed(1), unit: '%', yoy: '+16.3 pct' },
+    { name: '经营现金流净额', v: D.ocf, max: 15, num: v => fmt(v), unit: '亿元', yoy: '+121.7%' },
+  ];
+  items.forEach((it, i) => {
+    const cx = 300 + i * 440, cy = 470, r = 150;
+    const ap = easeOut(prog(lt, .15 + i * .18, .8));
+    const kk = easeBack(prog(lt, .4 + i * .18, 1.5));
+    gauge(cx, cy, r, { k: it.v * kk / it.max, max: it.max, majors: 5, minors: 2, appear: ap, thick: 12, tickLabels: false });
+    numberWithUnit(it.num(Math.min(it.v * kk, it.v)), it.unit, cx, cy + 165, { size: 58, unitSize: 24, glow: 18, alpha: ap });
+    text(it.name, cx, cy + 212, { size: 28, color: C.text, align: 'center', alpha: ap });
+    const ba = easeOut(prog(lt, 1.4 + i * .15, .6));
+    const bw = measure(it.yoy, 26, NUM, 'bold') + 60;
+    badge(it.yoy, cx - bw / 2, cy + 268, { size: 26, alpha: ba });
+  });
+  const fa = easeOut(prog(lt, 2.2, .8));
+  text('存储芯片占营收约三分之二  ·  每股收益 2.48 元', W / 2, 880, { size: 28, color: C.gold, align: 'center', alpha: fa, spacing: 2 });
+  text('数据来源：君正股份 2026 年半年度报告（300223.SZ / 03223.HK）；同比口径为与 2025 年上半年对比', W / 2, 935, { size: 20, color: C.sub, align: 'center', alpha: fa });
+  ctx.restore();
+}
+
+function renderFrame(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  background(t);
+  scene1(t); scene2(t); scene3(t); scene4(t); scene5(t); scene6(t);
+  hud(t);
+  // 片尾整体压暗
+  const out = easeInOut(prog(t, 29.3, .7));
+  if (out > 0) { ctx.fillStyle = `rgba(5,12,28,${out})`; ctx.fillRect(0, 0, W, H); }
+}
+window.renderFrame = renderFrame;
+window.DURATION = DURATION;
+
+// 直接在浏览器打开时实时播放
+if (!new URLSearchParams(location.search).has('capture')) {
+  const t0 = performance.now();
+  const loop = () => { renderFrame(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); };
+  document.fonts.ready.then(loop);
+}
+</script>
+</body>
+</html>
