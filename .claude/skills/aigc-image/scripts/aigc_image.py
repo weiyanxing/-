@@ -7,7 +7,7 @@
   python3 aigc_image.py --task-id 125xxxx-...        # 继续查询已创建的任务
 
 环境变量：
-  AIGC_TOKEN     必填，请求头 Authorization 的值
+  AIGC_TOKEN     可选，请求头 Authorization 的值（不设置则不带该请求头）
   AIGC_BASE_URL  可选，默认 https://api.shuyouyinli.cn/bzsq/member/cms/aigc/image
 """
 import argparse
@@ -48,7 +48,9 @@ def fail(msg):
 
 
 def call(method, url, token, body=None):
-    headers = {"Authorization": token, "accessToken": "bz"}
+    headers = {"accessToken": "bz"}
+    if token:
+        headers["Authorization"] = token
     data = None
     if body is not None:
         headers["Content-Type"] = "application/json"
@@ -160,7 +162,7 @@ def main():
     if a.dry_run:
         print(json.dumps(body, ensure_ascii=False, indent=2))
         return
-    token = os.environ.get("AIGC_TOKEN") or fail("未设置环境变量 AIGC_TOKEN")
+    token = os.environ.get("AIGC_TOKEN")
     task_id = a.task_id
     if not task_id:
         task_id = call("POST", f"{BASE_URL}/create", token, body).get("taskId") or fail("创建任务未返回 taskId")
