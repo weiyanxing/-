@@ -9,7 +9,7 @@ description: 生图 / 生成图片 / 画图 / 出图 / 文生图 / 图生图 / A
 
 - 创建任务：`POST https://api.shuyouyinli.cn/bzsq/member/cms/aigc/image/create`
 - 查询任务：`GET  https://api.shuyouyinli.cn/bzsq/member/cms/aigc/image/task?taskId=...`
-- 请求头：`Authorization: <AIGC_TOKEN>`、`accessToken: bz`
+- 请求头：`accessToken: bz`；设置了 `AIGC_TOKEN` 时再带 `Authorization: <AIGC_TOKEN>`（目前不带 token 也能调用）
 - 完整字段说明见同目录 `reference.md`
 
 ## 用法
@@ -40,7 +40,8 @@ python3 .claude/skills/aigc-image/scripts/aigc_image.py "提示词" \
 
 ## 注意
 
-- 需要环境变量 `AIGC_TOKEN`。没有时告诉用户在云环境设置里添加（环境变量或 Network secrets），**不要让用户把 token 贴进聊天**。
-- 云环境需要放行 `api.shuyouyinli.cn`（下载结果图还需放行图片所在域名，通常是 `*.vod.myqcloud.com`）。被代理 403 拒绝时，告诉用户在环境的 Network access 里加白名单，不要绕过。
+- `AIGC_TOKEN` 可选。需要时让用户在云环境设置里添加，**不要让用户把 token 贴进聊天**。
+- 云环境需要放行 `api.shuyouyinli.cn`；下载结果图还需放行 `*.vod-qcloud.com`（实测图片在 `store.vod-qcloud.com`）。被代理 403 拒绝时，告诉用户在环境的 Network access 里加白名单，不要绕过；下载失败时直接把 `fileUrl` 给用户。
+- 结果图 `storageMode` 为 `Temporary` 时链接会过期，要及时下载或转存。
 - 失败时脚本会以非 0 退出并给出 `errCodeExt` 含义：`RequestLimitExceeded` 可稍等重试；`InvalidParameter.VoilationContent` 需改写提示词；超时则用 `--task-id` 续查，不要重新创建任务。
-- 生成完把图片（`saved` 里的本地文件或 `fileUrl`）发给用户。
+- 生成完**必须把图片直接发到对话里**：用 `SendUserFile` 发送 `saved` 里的本地文件（`display: "render"`，`status: "normal"`，caption 写上提示词），用户可在对话里预览并下载保存到电脑。图片默认存到仓库的 `aigc-output/`（已在 `.gitignore` 中，不会提交）。下载失败时才退而给出 `fileUrl`。
