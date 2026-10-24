@@ -45,3 +45,5 @@ python3 .claude/skills/aigc-image/scripts/aigc_image.py "提示词" \
 - 结果图 `storageMode` 为 `Temporary` 时链接会过期，要及时下载或转存。
 - 失败时脚本会以非 0 退出并给出 `errCodeExt` 含义：`RequestLimitExceeded` 可稍等重试；`InvalidParameter.VoilationContent` 需改写提示词；超时则用 `--task-id` 续查，不要重新创建任务。
 - 生成完**必须把图片直接发到对话里**：用 `SendUserFile` 发送 `saved` 里的本地文件（`display: "render"`，`status: "normal"`，caption 写上提示词），用户可在对话里预览并下载保存到电脑。图片默认存到仓库的 `aigc-output/`（已在 `.gitignore` 中，不会提交）。下载失败时才退而给出 `fileUrl`。
+- **图生图的参考图**必须是接口服务器（国内）能下载的公网链接。用户发来的本地图片：先提交到这个公开仓库（如 `assets/refs/`）并推送，再用 `https://gcore.jsdelivr.net/gh/weiyanxing/-@<commit>/<路径>` 传给 `--ref`。`raw.githubusercontent.com` 和 `fastly.jsdelivr.net` 实测会下载超时（OG 模型偶尔能读 raw 链接，SI 不行）。提交前告诉用户这张图会公开在仓库里。
+- **透明背景 PNG**：提示词里要求“纯色深灰背景（#505050），无纹理、无渐变、无投影”，出图后运行 `python3 .claude/skills/aigc-image/scripts/remove_bg.py 输入.png 输出.png --crop --preview 预览.png`（依赖 numpy、scipy，缺了就 `pip install scipy`），检查预览里白底、黑底都没有灰边再交付。

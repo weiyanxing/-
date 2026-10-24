@@ -56,13 +56,19 @@ def call(method, url, token, body=None):
         headers["Content-Type"] = "application/json"
         data = json.dumps(body, ensure_ascii=False).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            text = resp.read().decode()
-    except urllib.error.HTTPError as e:
-        fail(f"{method} {url} 返回 HTTP {e.code}：{e.read().decode(errors='replace')[:500]}")
-    except urllib.error.URLError as e:
-        fail(f"{method} {url} 请求失败：{e.reason}")
+    # 查询是只读的，网络抖动时重试；创建任务不重试，避免重复建任务
+    attempts = 4 if method == "GET" else 1
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                text = resp.read().decode()
+            break
+        except urllib.error.HTTPError as e:
+            fail(f"{method} {url} 返回 HTTP {e.code}：{e.read().decode(errors='replace')[:500]}")
+        except OSError as e:
+            if i == attempts - 1:
+                fail(f"{method} {url} 请求失败：{getattr(e, 'reason', e)}")
+            time.sleep(2 ** (i + 1))
     try:
         res = json.loads(text)
     except ValueError:
