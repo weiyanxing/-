@@ -5,8 +5,12 @@
 背景色取四周边缘像素的中位数；与边缘连通的近背景色区域、以及内部较大的
 纯背景色空洞会变透明，过渡像素按色差给半透明并去除背景色残留。
 
+发光文字/霓虹类图片用 --mode glow：提示词要求纯黑背景（#000000），按亮度把
+光晕还原成半透明（α = 最亮通道 / knee），亮部保持不透明，颜色去掉黑色混合。
+
 用法：
   python3 remove_bg.py 输入.png 输出.png [--crop] [--preview 预览.png]
+  python3 remove_bg.py 输入.png 输出.png --mode glow [--knee 180] [--crop]
 依赖：pillow numpy scipy
 """
 import argparse
@@ -23,6 +27,8 @@ def main():
     p.add_argument("--low", type=float, default=12, help="色差低于此值完全透明（默认 12）")
     p.add_argument("--high", type=float, default=40, help="色差高于此值完全不透明（默认 40）")
     p.add_argument("--min-hole", type=float, default=0.0005, help="内部空洞最小面积占比（默认 0.0005）")
+    p.add_argument("--mode", choices=["flat", "glow"], default="flat", help="flat：纯色背景（默认）；glow：黑底发光")
+    p.add_argument("--knee", type=float, default=180, help="glow 模式下最亮通道达到此值即完全不透明（默认 180）")
     p.add_argument("--crop", action="store_true", help="裁到主体边界并留 3%% 边距")
     p.add_argument("--preview", help="另存一张棋盘格/白/黑三联预览图")
     a = p.parse_args()
@@ -33,6 +39,18 @@ def main():
     border = np.concatenate([img[:b].reshape(-1, 3), img[-b:].reshape(-1, 3),
                              img[:, :b].reshape(-1, 3), img[:, -b:].reshape(-1, 3)])
     bg = np.median(border, axis=0)
+
+    if a.mode == "glow":
+        # 背景噪点上限取边缘最亮通道的 99.5 分位，低于它的一律透明
+        floor = np.percentile(border.max(axis=1), 99.5)
+        m = np.clip(img.max(axis=2) - floor, 0, None)
+        alpha = np.clip(m / (a.knee - floor), 0, 1)
+        rgb = img.copy()
+        vis = alpha > 0
+        rgb[vis] = (img[vis] - (1 - alpha[vis, None]) * bg) / alpha[vis, None]
+        finish(a, rgb, alpha, bg, h, w)
+        return
+
     dist = np.linalg.norm(img - bg, axis=2)
 
     labels, n = ndimage.label(dist < a.high, structure=np.ones((3, 3)))
@@ -52,6 +70,10 @@ def main():
     rgb = img.copy()
     semi = (alpha > 0) & (alpha < 1)
     rgb[semi] = (img[semi] - (1 - alpha[semi, None]) * bg) / alpha[semi, None]
+    finish(a, rgb, alpha, bg, h, w)
+
+
+def finish(a, rgb, alpha, bg, h, w):
     out = np.dstack([np.clip(rgb, 0, 255), alpha * 255]).astype(np.uint8)
     res = Image.fromarray(out, "RGBA")
 
