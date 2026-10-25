@@ -8,9 +8,13 @@
 发光文字/霓虹类图片用 --mode glow：提示词要求纯黑背景（#000000），按亮度把
 光晕还原成半透明（α = 最亮通道 / knee），亮部保持不透明，颜色去掉黑色混合。
 
+书法、墨迹、单色笔触类图片用 --mode ink：白底（或任意纯色底）上按与背景的
+色差算透明度，飞白、枯笔的淡色边缘还原成半透明的墨色，不会在深色底上留浅色毛边。
+
 用法：
   python3 remove_bg.py 输入.png 输出.png [--crop] [--preview 预览.png]
   python3 remove_bg.py 输入.png 输出.png --mode glow [--knee 180] [--crop]
+  python3 remove_bg.py 输入.png 输出.png --mode ink [--crop]
 依赖：pillow numpy scipy
 """
 import argparse
@@ -27,7 +31,8 @@ def main():
     p.add_argument("--low", type=float, default=12, help="色差低于此值完全透明（默认 12）")
     p.add_argument("--high", type=float, default=40, help="色差高于此值完全不透明（默认 40）")
     p.add_argument("--min-hole", type=float, default=0.0005, help="内部空洞最小面积占比（默认 0.0005）")
-    p.add_argument("--mode", choices=["flat", "glow"], default="flat", help="flat：纯色背景（默认）；glow：黑底发光")
+    p.add_argument("--mode", choices=["flat", "glow", "ink"], default="flat",
+                   help="flat：纯色背景（默认）；glow：黑底发光；ink：纯色底上的墨迹/书法")
     p.add_argument("--knee", type=float, default=180, help="glow 模式下最亮通道达到此值即完全不透明（默认 180）")
     p.add_argument("--crop", action="store_true", help="裁到主体边界并留 3%% 边距")
     p.add_argument("--preview", help="另存一张棋盘格/白/黑三联预览图")
@@ -52,6 +57,18 @@ def main():
         return
 
     dist = np.linalg.norm(img - bg, axis=2)
+
+    if a.mode == "ink":
+        # 墨色取最浓 5% 像素的平均色；α = 色差 / 墨色色差，去掉背景混色
+        floor = np.percentile(np.linalg.norm(border - bg, axis=1), 99.5)
+        ink_px = img[dist >= np.percentile(dist, 99)]
+        knee = np.linalg.norm(ink_px.mean(axis=0) - bg) * 0.9
+        alpha = np.clip((dist - floor) / (knee - floor), 0, 1)
+        rgb = img.copy()
+        vis = alpha > 0
+        rgb[vis] = (img[vis] - (1 - alpha[vis, None]) * bg) / alpha[vis, None]
+        finish(a, rgb, alpha, bg, h, w)
+        return
 
     labels, n = ndimage.label(dist < a.high, structure=np.ones((3, 3)))
     edge_ids = np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]]))
