@@ -47,7 +47,11 @@ def fail(msg):
     sys.exit(1)
 
 
-def call(method, url, token, body=None):
+class ServerBusy(Exception):
+    pass
+
+
+def call(method, url, token, body=None, soft=False):
     headers = {"accessToken": "bz"}
     if token:
         headers["Authorization"] = token
@@ -74,6 +78,8 @@ def call(method, url, token, body=None):
     except ValueError:
         fail(f"{method} {url} 返回的不是 JSON：{text[:500]}")
     if res.get("code") != 200:
+        if soft and res.get("code") == 500:
+            raise ServerBusy(res.get("msg"))
         fail(f"接口返回 code={res.get('code')}：{res.get('msg')}")
     return res.get("data") or {}
 
@@ -109,7 +115,15 @@ def wait_task(task_id, token, interval, timeout):
     deadline = time.time() + timeout
     last = None
     while True:
-        data = call("GET", url, token)
+        try:
+            data = call("GET", url, token, soft=True)
+        except ServerBusy as e:
+            # 服务端临时 500（如"服务器开小差了"），任务还在，继续等
+            if time.time() > deadline:
+                fail(f"服务端持续报错（{e}），可稍后用 --task-id {task_id} 继续查询")
+            print(f"服务端暂时出错：{e}，{interval * 3:.0f}s 后重试", file=sys.stderr)
+            time.sleep(interval * 3)
+            continue
         status, progress = data.get("status"), data.get("progress")
         if (status, progress) != last:
             print(f"状态：{status}  进度：{progress}%", file=sys.stderr)
